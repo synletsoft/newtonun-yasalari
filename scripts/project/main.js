@@ -5,9 +5,9 @@ const TRACK_Y0 = 478;
 const TRACK_Y1 = 843;
 const X0 = 30;
 const G = 9.81;
-// Ideal inelastic contact: the rigid cart stops at the wall. The displayed
-// reading is the measured mean impact force, retained until reset:
-// F_mean = m Δv / Δt for the assumed 0.25 s measurement interval.
+const LAW1_MASS = 7.5;
+// A simple crush-zone model: the cart decelerates uniformly during contact.
+// The displayed mean contact force is retained as a measurement after impact.
 const IMPACT_SPEED = 3;
 const IMPACT_DURATION = 0.25;
 const IMPACT_GAP = 3;
@@ -16,6 +16,10 @@ const IMPACT_PIXELS_PER_METER = 70;
 const ROAD_WIDTH = 1920;
 // Keep the physics clock in seconds; this scale only controls how quickly the scene moves on screen.
 const METERS_TO_PIXELS = 46;
+const WHEEL_FRAME_COUNT = 60;
+const WHEEL_RADIUS_PX = 80;
+const RULER_POINTER_X = 970;
+const RULER_PX_PER_METER = 12;
 
 const sliderSpecs = {
   1: [
@@ -43,8 +47,12 @@ const defaults = {
 function collisionMotion(t, mass) {
   const hit=IMPACT_GAP/IMPACT_SPEED;
   const measuredForce=mass*IMPACT_SPEED/IMPACT_DURATION;
-  if(t<hit)return {x:IMPACT_GAP-IMPACT_SPEED*t,v:-IMPACT_SPEED,force:0,hit:false};
-  return {x:0,v:0,force:measuredForce,hit:true};
+  if(t<hit)return {x:IMPACT_GAP-IMPACT_SPEED*t,v:-IMPACT_SPEED,force:0,hit:false,contact:false};
+  const elapsed=Math.min(t-hit,IMPACT_DURATION);
+  const deceleration=IMPACT_SPEED/IMPACT_DURATION;
+  return {x:-IMPACT_SPEED*elapsed+0.5*deceleration*elapsed*elapsed,
+    v:-IMPACT_SPEED+deceleration*elapsed,force:measuredForce,hit:true,
+    contact:t<hit+IMPACT_DURATION};
 }
 
 runOnStartup(async runtime => {
@@ -61,7 +69,15 @@ function setup(runtime) {
   const show = (...names) => names.forEach(n => visible(n, true));
   const label = (name, value) => {const i=one(name); if(i) i.text=String(value);};
   const graphLines = GRAPH_SEGMENTS.map(row => row.map(uid => runtime.getInstanceByUid(uid)));
+  const forceStrokes = {
+    f1:runtime.getInstanceByUid(1347),f2:runtime.getInstanceByUid(1348),
+    wallAction:runtime.getInstanceByUid(1349),wallReaction:runtime.getInstanceByUid(1350),
+    tableAction:runtime.getInstanceByUid(1351),tableReaction:runtime.getInstanceByUid(1352)
+  };
   const roadTiles = runtime.objects.newtonRoad.getAllInstances().sort((a,b)=>a.uid-b.uid);
+  const rulerMarks = runtime.objects.graphLine.getAllInstances()
+    .filter(inst => inst.uid >= 1263 && inst.uid <= 1329).sort((a,b)=>a.uid-b.uid);
+  const rulerTexts = runtime.objects.rulerText.getAllInstances().sort((a,b)=>a.uid-b.uid);
   const pane = runtime.layout.getLayer('selection');
   const inputLayer = runtime.layout.getLayer('dashboard');
 
@@ -86,7 +102,7 @@ function setup(runtime) {
     return state.law===1 ? state.params.force : state.law===2 ? state.params.f1+state.params.f2 : 0;
   }
   function acceleration() {
-    if(state.law===1) return state.params.force/7.5;
+    if(state.law===1) return state.params.force/LAW1_MASS;
     if(state.law===2) return netForce()/state.params.mass;
     return 0;
   }
@@ -114,18 +130,22 @@ function setup(runtime) {
       const control=one(name);
       if(control){control.x=x;control.width=width;}
     }
+    const info=one('modelInfo');
+    if(info){info.x=x;info.width=width;}
   }
   function selectLaw(n) {
     hideScene();pane.isVisible=false;pane.isInteractive=false;
     state.law=n;state.mode='horizontal';state.params={...defaults[n]};state.time=0;state.running=false;state.paused=false;
     show('refreshBtn','audioBtn','shareBtn','fullScreenBtn','menuButton',
-      'btnStart','btnReset','startText','resetText');
+      'btnStart','btnReset','startText','resetText','modelInfo');
     fitPanelButtons(n);
     one('audioBtn').animationFrame=state.sound?1:0;
     if(n===1 || n===2) {
       show('newtonRoad','newtonShadow','newtonCart','wheelLeft','wheelRight',
         'graphSidebar','bottomRuler',`panel${n===1?'One':'Two'}`);
       roadTiles.forEach(tile=>tile.isVisible=true);
+      rulerMarks.forEach(mark=>mark.isVisible=true);
+      rulerTexts.forEach(item=>item.isVisible=true);
       for(let g=0;g<3;g++) {
         show(`graphPanel${g}`,`graphArea${g}`,`graphYMax${g}`,`graphYMid${g}`,`graphXMax${g}`);
         graphLines[g].forEach(s => {if(s) s.isVisible=false;});
@@ -134,9 +154,12 @@ function setup(runtime) {
       for(let i=0;i<count;i++) show(`track${n}_${i}`,`knob${n}_${i}`,`sliderValue${n}_${i}`);
       const heads=n===1?3:4;
       for(let i=0;i<heads;i++) show(`headValue${n}_${i}`);
-      if(n===1) show('headPosition1','headSpeed1','headForce1');
-      else show('headSpeed2','headPosition2','headAcceleration2','headNetForce2',
-        'forceArrow1','forceArrow2');
+      if(n===1) show('headPosition1','headSpeed1','headForce1','forceArrow1');
+      else {
+        show('headSpeed2','headPosition2','headAcceleration2','headNetForce2',
+          'forceArrow1','forceArrow2');
+        forceStrokes.f1.isVisible=true;forceStrokes.f2.isVisible=true;
+      }
     } else {
       one('headForce3').x=950;
       one('headForce3').animationFrame=0;
@@ -155,8 +178,10 @@ function setup(runtime) {
     if(state.law!==3 || mode===state.mode) return;
     state.mode=mode;state.time=0;state.running=false;state.paused=false;
     ['newtonShadow','newtonCart','newtonWall','wheelLeft','wheelRight','newtonTable','verticalBox',
+      'wallAction','wallReaction','tableAction','tableReaction',
       'modeHorizontalOn','modeHorizontalOff','modeVerticalOn','modeVerticalOff','panelThreeH','panelThreeV']
       .forEach(n=>visible(n,false));
+    for(const stroke of Object.values(forceStrokes))stroke.isVisible=false;
     if(mode==='horizontal') {
       state.params.thirdValue=defaults[3].thirdValue;
       show('newtonShadow','newtonCart','newtonWall','wheelLeft','wheelRight',
@@ -165,8 +190,12 @@ function setup(runtime) {
       state.params.thirdValue=5*G;
       show('newtonTable','verticalBox','modeHorizontalOff','modeVerticalOn','panelThreeV');
     }
+    visible('wallAction',false);
     visible('wallReaction',false);
+    visible('tableAction',mode==='vertical');
     visible('tableReaction',mode==='vertical');
+    forceStrokes.tableAction.isVisible=mode==='vertical';
+    forceStrokes.tableReaction.isVisible=mode==='vertical';
     visible('headSpeed3',mode==='horizontal');
     visible('headValue3_0',mode==='horizontal');
     visible('btnStart',mode==='horizontal');
@@ -193,16 +222,33 @@ function setup(runtime) {
     label('startText',state.running?'Ⅱ  Durdur':state.paused?'▷  Devam Et':'▷  Başlat');
     one('btnStart').animationFrame=state.running?1:0;
     if(state.law===1) {
+      label('modelInfo','m = 7,5 kg · sürtünme = 0');
       label('headValue1_0',`${x.toFixed(1)} m`);
       label('headValue1_1',`${v.toFixed(1)} m/s`);
       label('headValue1_2',`${f.toFixed(1)} N`);
+      const arrow=one('forceArrow1');
+      if(arrow){arrow.x=850;arrow.y=527;arrow.isVisible=f>0;}
+      forceStrokes.f1.x=865;
+      forceStrokes.f1.y=585;
+      forceStrokes.f1.isVisible=f>0;
+      label('forceArrow1',`→ F = ${f.toFixed(0)} N`);
     } else if(state.law===2) {
+      label('modelInfo','Sürtünme: 0 N');
       label('headValue2_0',`${v.toFixed(1)} m/s`);
       label('headValue2_1',`${x.toFixed(1)} m`);
       label('headValue2_2',`${a.toFixed(1)} m/s²`);
       label('headValue2_3',`${f.toFixed(1)} N`);
       const cargo=Math.max(1,Math.min(4,Math.ceil(p.mass/5)));
       for(let i=1;i<=4;i++)visible(`cargo${i}`,i===cargo);
+      // Keep both force vectors above the tallest visible load.
+      const forceArrowY=527-Math.max(0,cargo-2)*80;
+      for(const name of ['forceArrow1','forceArrow2']) {
+        const arrow=one(name);if(arrow)arrow.y=forceArrowY;
+      }
+      forceStrokes.f1.y=forceArrowY+58;
+      forceStrokes.f2.y=forceArrowY+58;
+      forceStrokes.f1.isVisible=p.f1!==0;
+      forceStrokes.f2.isVisible=p.f2!==0;
       const arrow=(force,name)=>{
         const magnitude=Math.abs(force);
         label(name,force>0?`→ F${name==='forceArrow1'?'₁':'₂'} +${magnitude} N`:
@@ -211,40 +257,86 @@ function setup(runtime) {
       };
       arrow(p.f1,'forceArrow1');arrow(p.f2,'forceArrow2');
     } else if(state.mode==='horizontal') {
-      label('headValue3_0',`${Math.abs(v).toFixed(1)} m/s`);
+      label('modelInfo','3 m mesafe · 0,25 s temas');
+      label('headValue3_0',`${v.toFixed(1)} m/s`);
       label('headValue3_1',`${impact.force.toFixed(1)} N`);
+      visible('wallAction',impact.hit);
       visible('wallReaction',impact.hit);
-      label('wallReaction',`→ Duvar: ${impact.force.toFixed(1)} N`);
+      forceStrokes.wallAction.isVisible=impact.hit;
+      forceStrokes.wallReaction.isVisible=impact.hit;
+      label('wallAction',`← Araba → duvar: ${impact.force.toFixed(1)} N (ort.)`);
+      label('wallReaction',`→ Duvar → araba: ${impact.force.toFixed(1)} N (ort.)`);
     } else {
       const weight=p.thirdValue;
+      label('modelInfo','g = 9,81 m/s²');
       label('headValue3_0','0.0 m/s');
       label('headValue3_1',`${weight.toFixed(1)} N`);
-      label('tableReaction',`↑ N = ${weight.toFixed(1)} N`);
+      label('tableAction',`↓ Kutu → masa: ${weight.toFixed(1)} N`);
+      label('tableReaction',`↑ Masa → kutu: ${weight.toFixed(1)} N`);
       const box=one('verticalBox');if(box)box.animationFrame=Math.round((weight/G-1)/19*60);
     }
     const travel=impact?(x-IMPACT_GAP)*IMPACT_PIXELS_PER_METER:
       state.law===3?0:(x-X0)*METERS_TO_PIXELS;
-    // Move the cart across the scene first, then follow it with the camera.
-    const dx=impact?x*IMPACT_PIXELS_PER_METER:Math.max(-160,Math.min(300,travel));
-    const roadTravel=impact?x*IMPACT_PIXELS_PER_METER-dx:travel;
-    const cameraTravel=impact?roadTravel:travel-dx;
+    // Laws 1 and 2 use a fixed camera on the cart. The road and ruler pass
+    // underneath it by exactly the displacement used for the graphs.
+    const dx=impact?x*IMPACT_PIXELS_PER_METER:0;
+    const cameraTravel=impact?x*IMPACT_PIXELS_PER_METER-dx:travel;
     const roadOffset=((cameraTravel%ROAD_WIDTH)+ROAD_WIDTH)%ROAD_WIDTH;
     roadTiles.forEach((tile,i)=>{tile.x=i*ROAD_WIDTH-roadOffset;});
     if(impact)one('newtonWall').x=558-cameraTravel;
     if(state.law!==3 || state.mode==='horizontal') {
       const cart=one('newtonCart'),wl=one('wheelLeft'),wr=one('wheelRight'),shadow=one('newtonShadow');
       const cartShift=impact?IMPACT_CART_X-678+dx:dx;
-      if(cart)cart.x=678+cartShift;
-      if(wl){wl.x=785+cartShift;wl.angle=travel/80;}
-      if(wr){wr.x=1111+cartShift;wr.angle=travel/80;}
+      if(cart) {
+        // The front stays against the wall while the chassis compresses by
+        // the contact displacement; the wheels follow the cart's mass.
+        cart.x=impact&&x<0?IMPACT_CART_X:678+cartShift;
+        cart.width=impact&&x<0?540+dx:540;
+      }
+      // Source frames bake the light in place while rotating the hub.
+      const turns=travel/(2*Math.PI*WHEEL_RADIUS_PX);
+      const frame=((Math.floor(turns*WHEEL_FRAME_COUNT)%WHEEL_FRAME_COUNT)+WHEEL_FRAME_COUNT)%WHEEL_FRAME_COUNT;
+      if(wl){wl.x=785+cartShift;wl.angle=0;wl.animationFrame=frame;}
+      if(wr){wr.x=1111+cartShift;wr.angle=0;wr.animationFrame=frame;}
       if(shadow)shadow.x=594+cartShift;
       if(state.law===2)for(let i=1;i<=4;i++){const c=one(`cargo${i}`);if(c)c.x=700+dx;}
       if(state.law===2) {
         const arrow1=one('forceArrow1'),arrow2=one('forceArrow2');
         if(arrow1)arrow1.x=680+dx;
         if(arrow2)arrow2.x=940+dx;
+        forceStrokes.f1.x=700+dx;
+        forceStrokes.f2.x=960+dx;
       }
     }
+    if(state.law===1 || state.law===2)updateRuler(x);
+  }
+  function updateRuler(x) {
+    const firstMeter=Math.floor(x)-32;
+    // Entry 0 covers the baked ticks; entries 1..65 are the moving marks;
+    // the final entry is the fixed red cursor.
+    for(let i=0;i<65;i++) {
+      const mark=rulerMarks[i+1];
+      if(!mark)continue;
+      const meter=firstMeter+i;
+      const px=RULER_POINTER_X+(meter-x)*RULER_PX_PER_METER;
+      mark.x=px;
+      mark.isVisible=px>=651&&px<=1397;
+      const major=meter%5===0;
+      mark.y=major?1014:1020;
+      mark.height=major?28:16;
+      mark.width=major?3:2;
+    }
+    const firstMajor=Math.floor(x/5)*5-30;
+    for(let i=0;i<13;i++) {
+      const label=rulerTexts[i];
+      if(!label)continue;
+      const meter=firstMajor+i*5;
+      const px=RULER_POINTER_X+(meter-x)*RULER_PX_PER_METER;
+      label.x=px-29;
+      label.text=String(meter);
+      label.isVisible=meter%10===0&&px>=674&&px<=1372&&Math.abs(px-RULER_POINTER_X)>25;
+    }
+    if(rulerTexts[13])rulerTexts[13].text=`Konum: ${x.toFixed(1)} m`;
   }
   function updateGraphs() {
     if(state.law!==1 && state.law!==2)return;

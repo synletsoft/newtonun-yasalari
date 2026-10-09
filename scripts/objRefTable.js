@@ -135,6 +135,10 @@ self.C3_JsPropNameTable = [
 	{forceArrow2: 0},
 	{wallReaction: 0},
 	{tableReaction: 0},
+	{rulerText: 0},
+	{modelInfo: 0},
+	{wallAction: 0},
+	{tableAction: 0},
 	{isLoader: 0}
 ];
 
@@ -253,5 +257,9 @@ self.InstanceType = {
 	forceArrow1: class extends self.ITextInstance {},
 	forceArrow2: class extends self.ITextInstance {},
 	wallReaction: class extends self.ITextInstance {},
-	tableReaction: class extends self.ITextInstance {}
+	tableReaction: class extends self.ITextInstance {},
+	rulerText: class extends self.ITextInstance {},
+	modelInfo: class extends self.ITextInstance {},
+	wallAction: class extends self.ITextInstance {},
+	tableAction: class extends self.ITextInstance {}
 }
