@@ -33,9 +33,6 @@ self.C3_JsPropNameTable = [
 	{newtonRoad: 0},
 	{newtonShadow: 0},
 	{cargo1: 0},
-	{cargo2: 0},
-	{cargo3: 0},
-	{cargo4: 0},
 	{newtonCart: 0},
 	{newtonWall: 0},
 	{newtonTable: 0},
@@ -133,12 +130,14 @@ self.C3_JsPropNameTable = [
 	{graphLine: 0},
 	{forceArrow1: 0},
 	{forceArrow2: 0},
+	{vectorGlyph: 0},
 	{wallReaction: 0},
 	{tableReaction: 0},
 	{rulerText: 0},
 	{modelInfo: 0},
 	{wallAction: 0},
 	{tableAction: 0},
+	{panelToggle: 0},
 	{isLoader: 0}
 ];
 
@@ -156,9 +155,6 @@ self.InstanceType = {
 	newtonRoad: class extends self.ISpriteInstance {},
 	newtonShadow: class extends self.ISpriteInstance {},
 	cargo1: class extends self.ISpriteInstance {},
-	cargo2: class extends self.ISpriteInstance {},
-	cargo3: class extends self.ISpriteInstance {},
-	cargo4: class extends self.ISpriteInstance {},
 	newtonCart: class extends self.ISpriteInstance {},
 	newtonWall: class extends self.ISpriteInstance {},
 	newtonTable: class extends self.ISpriteInstance {},
@@ -256,10 +252,12 @@ self.InstanceType = {
 	graphLine: class extends self.ISpriteInstance {},
 	forceArrow1: class extends self.ITextInstance {},
 	forceArrow2: class extends self.ITextInstance {},
+	vectorGlyph: class extends self.ISpriteInstance {},
 	wallReaction: class extends self.ITextInstance {},
 	tableReaction: class extends self.ITextInstance {},
 	rulerText: class extends self.ITextInstance {},
 	modelInfo: class extends self.ITextInstance {},
 	wallAction: class extends self.ITextInstance {},
-	tableAction: class extends self.ITextInstance {}
+	tableAction: class extends self.ITextInstance {},
+	panelToggle: class extends self.ISpriteInstance {}
 }
